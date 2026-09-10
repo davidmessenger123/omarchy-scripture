@@ -37,6 +37,11 @@ BarWidget {
   property int pendingFocal: 0
   property bool webRetried: false
   property bool esvRetried: false
+  property string pendingKey: ""
+
+  // Absolute path to this plugin's folder (trailing slash), resolved from the
+  // QML file itself so keyctl.py is found wherever the plugin lives.
+  readonly property string pluginDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "")
 
   readonly property bool hasContent: contextBefore !== "" || verseText !== "" || contextAfter !== ""
   readonly property bool hasKeyFile: root.keyFromFile.trim() !== ""
@@ -128,23 +133,18 @@ BarWidget {
       root.keyNoticeError = true
       return
     }
-    keyWriteProcess.command = [
-      "sh", "-c",
-      'mkdir -p "$HOME/.config/omarchy/plugins/davidjm.scripture" && umask 077 && printf "%s" "$1" > "$HOME/.config/omarchy/plugins/davidjm.scripture/esv.key"',
-      "scripture", value
-    ]
+    root.pendingKey = value
+    keyWriteProcess.command = ["python3", root.pluginDir + "keyctl.py", "save", value]
     keyWriteProcess.running = true
-    root.keyFromFile = value
     keyInput.text = ""
-    root.keyNotice = "Key saved — the next verse loads from the ESV."
+    root.keyNotice = "Saving the ESV key…"
     root.keyNoticeError = false
   }
 
   function removeKey() {
-    keyRemoveProcess.command = ["sh", "-c", 'rm -f "$HOME/.config/omarchy/plugins/davidjm.scripture/esv.key"']
+    keyRemoveProcess.command = ["python3", root.pluginDir + "keyctl.py", "remove"]
     keyRemoveProcess.running = true
-    root.keyFromFile = ""
-    root.keyNotice = "Key removed — verses now come from the World English Bible."
+    root.keyNotice = "Removing the key…"
     root.keyNoticeError = false
   }
 
@@ -309,10 +309,11 @@ BarWidget {
   }
 
   // Optional key fallback source; runs once at startup and is a no-op when the
-  // file isn't there.
+  // file isn't there. keyctl.py refuses symlinks, so a pre-positioned link can
+  // never make this plugin read a file from somewhere else.
   Process {
     id: keyProcess
-    command: ["sh", "-c", 'key="$HOME/.config/omarchy/plugins/davidjm.scripture/esv.key"; if [ -f "$key" ]; then tr -d "[:space:]" < "$key"; fi']
+    command: ["python3", root.pluginDir + "keyctl.py", "get"]
     stdout: StdioCollector {
       waitForEnd: true
       id: keyOutput
@@ -578,16 +579,36 @@ BarWidget {
     running: false
   }
 
-  // Key-file write/remove; quiet by design — the notice text already reflects
-  // the outcome, and the file is re-read at next startup if this crashes too
-  // early to matter.
+  // Key-file write/remove; result-aware so a refused (e.g. symlink) write
+  // never reports a save. The file is re-read at next startup regardless.
   Process {
     id: keyWriteProcess
     running: false
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.keyFromFile = root.pendingKey
+        root.pendingKey = ""
+        root.keyNotice = "Key saved — the next verse loads from the ESV."
+        root.keyNoticeError = false
+      } else {
+        root.keyNotice = "Could not save the key."
+        root.keyNoticeError = true
+      }
+    }
   }
 
   Process {
     id: keyRemoveProcess
     running: false
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.keyFromFile = ""
+        root.keyNotice = "Key removed — verses now come from the World English Bible."
+        root.keyNoticeError = false
+      } else {
+        root.keyNotice = "Could not remove the key."
+        root.keyNoticeError = true
+      }
+    }
   }
 }

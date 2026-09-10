@@ -7,6 +7,12 @@
 // Well-known, always-valid references drawn across the whole Bible. With an
 // ESV key these feed api.esv.org verbatim; without one the plugin asks
 // bible-api.com for a random World English Bible verse instead.
+// Hard cap on any upstream response. A single short passage is a few KB, so
+// 256 KiB leaves huge headroom while bounding how much a misbehaving or
+// compromised endpoint can make the shared shell buffer (curl aborts with
+// exit 63 the moment the byte budget is spent; --max-time only caps duration).
+var MAX_RESPONSE_BYTES = 262144
+
 var SCRIPTURE = [
   "Genesis 1:1", "Genesis 1:27", "Genesis 2:18", "Genesis 12:2", "Genesis 28:15",
   "Exodus 14:14", "Exodus 15:2", "Exodus 20:12", "Exodus 33:14",
@@ -293,7 +299,7 @@ function composeRichText(before, focal, after) {
 function runEsv(process, reference, key) {
   process.requestedPassage = reference
   process.command = [
-    "curl", "-s", "--max-time", "15",
+    "curl", "-s", "--max-time", "15", "--max-filesize", String(MAX_RESPONSE_BYTES),
     "-H", "Authorization: Token " + String(key || "").trim(),
     "https://api.esv.org/v3/passage/text/?q=" + encodeReference(reference) +
       "&include-headings=false&include-footnotes=false&include-verse-numbers=true" +
@@ -305,7 +311,7 @@ function runEsv(process, reference, key) {
 // Kick off curl against bible-api.com for a keyless WEB passage range.
 function runWeb(process, reference) {
   process.command = [
-    "curl", "-s", "--max-time", "15",
+    "curl", "-s", "--max-time", "15", "--max-filesize", String(MAX_RESPONSE_BYTES),
     "https://bible-api.com/" + String(reference || "").trim().replace(/\s+/g, "+") +
       "?translation=web"
   ]
