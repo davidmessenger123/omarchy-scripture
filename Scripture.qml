@@ -80,8 +80,12 @@ BarWidget {
     root.esvRetried = false
 
     var key = root.apiKey()
-    if (key) Scripture.runEsv(esvProcess, root.pendingReference, key)
-    else Scripture.runWeb(randomProcess, root.pendingReference)
+    if (key) {
+      Scripture.runEsv(esvProcess, root.pendingReference, root.pluginDir)
+      esvProcess.write(key + "\n")
+    } else {
+      Scripture.runWeb(randomProcess, root.pendingReference)
+    }
   }
 
   // Fail-safe: never leave the overlay stuck on the loading dots if a fetch
@@ -134,8 +138,9 @@ BarWidget {
       return
     }
     root.pendingKey = value
-    keyWriteProcess.command = ["python3", root.pluginDir + "keyctl.py", "save", value]
+    keyWriteProcess.command = ["python3", root.pluginDir + "keyctl.py", "save"]
     keyWriteProcess.running = true
+    keyWriteProcess.write(value + "\n")
     keyInput.text = ""
     root.keyNotice = "Saving the ESV key…"
     root.keyNoticeError = false
@@ -499,6 +504,7 @@ BarWidget {
   Process {
     id: esvProcess
     property string requestedPassage: ""
+    stdinEnabled: true
     stdout: StdioCollector {
       waitForEnd: true
       id: esvOutput
@@ -515,7 +521,8 @@ BarWidget {
       if (exitCode !== 0 || !payload || !Array.isArray(payload.passages) || payload.passages.length === 0) {
         if (root.pendingAnchor && root.pendingAnchor !== root.pendingReference && !root.esvRetried) {
           root.esvRetried = true
-          Scripture.runEsv(esvProcess, root.pendingAnchor, root.apiKey())
+          Scripture.runEsv(esvProcess, root.pendingAnchor, root.pluginDir)
+          esvProcess.write(root.apiKey() + "\n")
           return
         }
         root.errorText = "Could not load from the ESV API. Check your key and connection."
@@ -583,6 +590,7 @@ BarWidget {
   // never reports a save. The file is re-read at next startup regardless.
   Process {
     id: keyWriteProcess
+    stdinEnabled: true
     running: false
     onExited: function(exitCode) {
       if (exitCode === 0) {

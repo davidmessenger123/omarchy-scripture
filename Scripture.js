@@ -5,12 +5,14 @@
 // chapter:verse, and the request stays light even before a key is installed.
 
 // Well-known, always-valid references drawn across the whole Bible. With an
-// ESV key these feed api.esv.org verbatim; without one the plugin asks
-// bible-api.com for a random World English Bible verse instead.
+// ESV key these feed api.esv.org verbatim (via esv_fetch.py, key on stdin so
+// it never appears in argv); without one the plugin asks bible-api.com for a
+// random World English Bible verse instead.
 // Hard cap on any upstream response. A single short passage is a few KB, so
 // 256 KiB leaves huge headroom while bounding how much a misbehaving or
-// compromised endpoint can make the shared shell buffer (curl aborts with
-// exit 63 the moment the byte budget is spent; --max-time only caps duration).
+// compromised endpoint can make the shared shell buffer. The keyless web
+// curl aborts with exit 63 the moment its byte budget is spent; esv_fetch.py
+// enforces the same ceiling inside the process.
 var MAX_RESPONSE_BYTES = 262144
 
 var SCRIPTURE = [
@@ -294,16 +296,16 @@ function composeRichText(before, focal, after) {
     span("rgba(255,255,255,0.55)", escape(after))
 }
 
-// Kick off curl against api.esv.org for one short passage. The caller owns
-// the Process and its onExited handler.
-function runEsv(process, reference, key) {
+// Kick off an ESV fetch for one short passage. The caller owns the Process
+// and its onExited handler. The API key is never placed in argv: the caller
+// feeds it to this process's stdin after starting, and esv_fetch.py reads it
+// there (the reference travels in argv, which contains no secret). The
+// response cap from MAX_RESPONSE_BYTES is enforced inside esv_fetch.py.
+function runEsv(process, reference, scriptDir) {
   process.requestedPassage = reference
   process.command = [
-    "curl", "-s", "--max-time", "15", "--max-filesize", String(MAX_RESPONSE_BYTES),
-    "-H", "Authorization: Token " + String(key || "").trim(),
-    "https://api.esv.org/v3/passage/text/?q=" + encodeReference(reference) +
-      "&include-headings=false&include-footnotes=false&include-verse-numbers=true" +
-      "&include-short-copyright=false&include-passage-references=false"
+    "python3", String(scriptDir || "") + "esv_fetch.py",
+    encodeReference(reference)
   ]
   process.running = true
 }
