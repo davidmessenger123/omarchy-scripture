@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "davidjm.scripture",
+  "name": "Scripture",
+  "version": "1.0.0",
+  "author": "David JM",
+  "license": "MIT",
+  "description": "Shows a random Scripture verse on the full-screen dark scrim Omarchy's speed tests use. ESV when an api.esv.org key is set; World English Bible otherwise.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Scripture.qml"
+  },
+  "barWidget": {
+    "displayName": "Scripture",
+    "description": "One bar icon that shows a random Bible verse centered on a full-screen dark scrim — no card, like the Omarchy speed tests. Esc, the scrim, or the icon again closes it.",
+    "category": "Reference",
+    "allowMultiple": false,
+    "schema": [
+      {
+        "key": "apiKey",
+        "type": "string",
+        "label": "ESV API key (api.esv.org)",
+        "defaultValue": "",
+        "description": "Free key from api.esv.org (Create Application). Enables the English Standard Version. Leave empty to fall back to the World English Bible via bible-api.com."
+      }
+    ]
+  }
+}
