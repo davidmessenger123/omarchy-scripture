@@ -52,6 +52,38 @@ BarWidget {
   readonly property color onScrim: "white"
   readonly property color onScrimDim: Qt.rgba(1, 1, 1, 0.55)
   readonly property color onScrimUrgent: "#ff6b6b"
+  // Decorative monospace flanks for the verse, drawn with the same full-block
+  // `█` characters the Omarchy screensaver logo uses. The art is symmetric,
+  // so one string serves both sides and stays on the fixed overlay palette.
+  readonly property string crossArt: "      ███\n" +
+    "      ███\n" +
+    "      ███\n" +
+    "  ███████████\n" +
+    "  ███████████\n" +
+    "      ███\n" +
+    "      ███\n" +
+    "      ███\n" +
+    "      ███\n" +
+    "      ███\n" +
+    "      ███\n" +
+    "      ███\n" +
+    "      ███"
+  readonly property int crossFontSize: Math.round(Style.font.displayLarge * 1.5)
+  // Typewriter reveal: once a verse lands its characters stream in over
+  // ~revealDurationMs instead of the whole passage snapping on. `revealedChars`
+  // -1 means "show it all".
+  property int revealedChars: -1
+  property int revealTotal: 0
+  property int revealStep: 1
+  readonly property int revealIntervalMs: 16
+  readonly property int revealDurationMs: 2200
+
+  function startReveal() {
+    root.revealTotal = (root.contextBefore + root.verseText + root.contextAfter).length
+    root.revealStep = Math.max(1, Math.ceil(root.revealTotal * root.revealIntervalMs / root.revealDurationMs))
+    root.revealedChars = 0
+    revealTimer.restart()
+  }
 
   // Preferred key source: the widget's inline shell.json entry, then an
   // optional `esv.key` file beside the plugin so the token never has to live
@@ -99,6 +131,20 @@ BarWidget {
       randomProcess.running = false
       root.loading = false
       root.errorText = "The verse fetch timed out. Try again."
+    }
+  }
+
+  // Advances the typewriter reveal until the whole passage is on screen.
+  Timer {
+    id: revealTimer
+    interval: root.revealIntervalMs
+    repeat: true
+    onTriggered: {
+      root.revealedChars = Math.min(root.revealTotal, root.revealedChars + root.revealStep)
+      if (root.revealedChars >= root.revealTotal) {
+        root.revealedChars = root.revealTotal
+        revealTimer.running = false
+      }
     }
   }
 
@@ -371,6 +417,42 @@ BarWidget {
       Keys.onReturnPressed: if (!root.loading) root.refresh()
       Keys.onEnterPressed: if (!root.loading) root.refresh()
 
+      // The crosses hug the display edges rather than the scripture, so the
+      // verse stays centered with the ornaments at fixed screen positions.
+      Text {
+        textFormat: Text.PlainText
+        text: root.crossArt
+        color: root.onScrimDim
+        font.family: "monospace"
+        font.pixelSize: root.crossFontSize
+        lineHeight: 1.0
+        anchors.left: keyCatcher.left
+        anchors.leftMargin: Style.space(64)
+        anchors.verticalCenter: keyCatcher.verticalCenter
+        opacity: root.loading ? 0.45 : 1
+
+        Behavior on opacity {
+          NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+        }
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        text: root.crossArt
+        color: root.onScrimDim
+        font.family: "monospace"
+        font.pixelSize: root.crossFontSize
+        lineHeight: 1.0
+        anchors.right: keyCatcher.right
+        anchors.rightMargin: Style.space(64)
+        anchors.verticalCenter: keyCatcher.verticalCenter
+        opacity: root.loading ? 0.45 : 1
+
+        Behavior on opacity {
+          NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+        }
+      }
+
       Item {
         id: cluster
         anchors.centerIn: parent
@@ -411,7 +493,7 @@ BarWidget {
               Style.space(760))
             text: root.loading && !root.hasContent ? "…"
               : root.hasContent
-                ? Scripture.composeRichText(root.contextBefore, root.verseText, root.contextAfter)
+                ? Scripture.composeRichText(root.contextBefore, root.verseText, root.contextAfter, root.revealedChars)
                 : ""
             color: root.onScrim
             font.family: root.fontFamily
@@ -540,6 +622,7 @@ BarWidget {
       root.contextAfter = parts.after
       root.esvRetried = false
       root.loading = false
+      root.startReveal()
     }
   }
 
@@ -578,6 +661,7 @@ BarWidget {
       root.contextAfter = parts.after
       root.webRetried = false
       root.loading = false
+      root.startReveal()
     }
   }
 

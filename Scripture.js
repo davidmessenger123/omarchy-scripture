@@ -278,7 +278,9 @@ function parseWebPassage(payload, focal) {
 // One rich-text string: the leading context and trailing context dimmed, the
 // anchor verse bright. All spans inherit the Text element's font size, so
 // lines stay even. Falls back to a plain merge if HTML is undesirable later.
-function composeRichText(before, focal, after) {
+// `maxChars` optionally truncates reveal progress (chars across before →
+// focal → after) for the typewriter effect; omit it (or -1) to show it all.
+function composeRichText(before, focal, after, maxChars) {
   function span(color, content) {
     return content === "" ? "" : '<span style="color:' + color + ';">' + content + '</span>'
   }
@@ -291,9 +293,28 @@ function composeRichText(before, focal, after) {
       .replace(/\n/g, "<br/>")
   }
 
-  return span("rgba(255,255,255,0.55)", escape(before)) +
-    span("#ffffff", escape(focal)) +
-    span("rgba(255,255,255,0.55)", escape(after))
+  var b = String(before === null || before === undefined ? "" : before)
+  var f = String(focal === null || focal === undefined ? "" : focal)
+  var a = String(after === null || after === undefined ? "" : after)
+
+  if (maxChars !== undefined && maxChars >= 0) {
+    var bl = b.length
+    var fl = f.length
+    if (maxChars <= bl) {
+      b = b.slice(0, maxChars)
+      f = ""
+      a = ""
+    } else if (maxChars <= bl + fl) {
+      f = f.slice(0, maxChars - bl)
+      a = ""
+    } else {
+      a = a.slice(0, maxChars - bl - fl)
+    }
+  }
+
+  return span("rgba(255,255,255,0.55)", escape(b)) +
+    span("#ffffff", escape(f)) +
+    span("rgba(255,255,255,0.55)", escape(a))
 }
 
 // Kick off an ESV fetch for one short passage. The caller owns the Process
