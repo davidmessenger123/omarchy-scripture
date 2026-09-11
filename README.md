@@ -10,7 +10,7 @@ small key panel where you can paste, save, remove, or fetch an ESV API key.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/davidjm/omarchy-scripture.git --enable
+omarchy plugin add https://github.com/davidmessenger123/omarchy-scripture.git --enable
 ```
 
 The bar asks where to place the book icon; `omarchy bar move davidjm.scripture -s right`
