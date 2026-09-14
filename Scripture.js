@@ -91,10 +91,32 @@ function nextNamespace() {
   return "omarchy-scripture-" + (++_namespaceCounter)
 }
 
+// No-repeat rotation: a shuffled deck through the whole curated list so a
+// verse is not repeated until every reference has been shown. The deck is
+// reshuffled when exhausted (and the draw that follows a reshuffle can never
+// equal the immediately previous verse).
+var _deck = []
+var _deckPos = 0
+
+function _shuffleDeck() {
+  var pool = SCRIPTURE.slice()
+  for (var i = pool.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1))
+    var tmp = pool[i]
+    pool[i] = pool[j]
+    pool[j] = tmp
+  }
+  _deck = pool
+  _deckPos = 0
+}
+
 function randomReference(avoid) {
-  var reference = avoid
-  for (var guard = 0; guard < 8 && reference === avoid; guard++) {
-    reference = SCRIPTURE[Math.floor(Math.random() * SCRIPTURE.length)]
+  if (_deckPos >= _deck.length) _shuffleDeck()
+  var reference = _deck[_deckPos]
+  _deckPos++
+  if (reference === avoid && _deck.length > 1) {
+    reference = _deck[_deckPos % _deck.length]
+    _deckPos++
   }
   return reference
 }
@@ -331,12 +353,18 @@ function runEsv(process, reference, scriptDir) {
   process.running = true
 }
 
-// Kick off curl against bible-api.com for a keyless WEB passage range.
-function runWeb(process, reference) {
+// Kick off curl against bible-api.com for a keyless passage range. The
+// translation is "web" (World English Bible) or "kjv" (King James Version);
+// both are keyless. The translation id is remembered without any surrounding
+// spaces so callers can pass a verbatim setting value.
+function runWeb(process, reference, translation) {
+  var tr = String(translation === undefined || translation === null ? "web" : translation)
+    .trim().toLowerCase()
+  if (tr !== "web" && tr !== "kjv") tr = "web"
   process.command = [
     "curl", "-s", "--max-time", "15", "--max-filesize", String(MAX_RESPONSE_BYTES),
     "https://bible-api.com/" + String(reference || "").trim().replace(/\s+/g, "+") +
-      "?translation=web"
+      "?translation=" + tr
   ]
   process.running = true
 }
@@ -344,5 +372,6 @@ function runWeb(process, reference) {
 function browserUrl(reference, translationId) {
   var slug = String(reference || "").replace(/\s+/g, "+")
   if (translationId === "esv") return "https://www.esv.org/" + slug + "/"
-  return "https://www.biblegateway.com/passage/?search=" + slug + "&version=WEB"
+  var version = translationId === "kjv" ? "KJV" : "WEB"
+  return "https://www.biblegateway.com/passage/?search=" + slug + "&version=" + version
 }

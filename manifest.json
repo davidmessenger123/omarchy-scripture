@@ -5,14 +5,14 @@
   "version": "1.0.0",
   "author": "David JM",
   "license": "MIT",
-  "description": "Shows a random Scripture verse on the full-screen dark scrim Omarchy's speed tests use. ESV when an api.esv.org key is set; World English Bible otherwise.",
+  "description": "Shows a random Scripture verse on the full-screen dark scrim Omarchy's speed tests use. ESV, World English Bible, or King James Version; ESV when an api.esv.org key is set, WEB and KJV are keyless.",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "Scripture.qml"
   },
   "barWidget": {
     "displayName": "Scripture",
-    "description": "One bar icon that shows a random Bible verse centered on a full-screen dark scrim — no card, like the Omarchy speed tests. Esc, the scrim, or the icon again closes it.",
+    "description": "One bar icon that shows a random Bible verse centered on a full-screen dark scrim — no card, like the Omarchy speed tests. Esc, the scrim, or the icon again closes it. Cred: also jump to a reference, history back/forward, favorites, a fixed verse of the day, and daily auto-open.",
     "category": "Reference",
     "allowMultiple": false,
     "schema": [
@@ -22,6 +22,28 @@
         "label": "ESV API key (api.esv.org)",
         "defaultValue": "",
         "description": "Free key from api.esv.org (Create Application). Enables the English Standard Version. Leave empty to fall back to the World English Bible via bible-api.com."
+      },
+      {
+        "key": "translation",
+        "type": "enum",
+        "label": "Translation",
+        "defaultValue": "ESV",
+        "options": ["ESV", "WEB", "KJV"],
+        "description": "ESV needs the api.esv.org key above; WEB (World English Bible) and KJV (King James Version) are keyless via bible-api.com. If ESV is chosen without a key, WEB is shown instead."
+      },
+      {
+        "key": "fixedReference",
+        "type": "string",
+        "label": "Fixed verse (overrides random)",
+        "defaultValue": "",
+        "description": "e.g. John 3:16. When set, the overlay always opens to this reference instead of rotating, and the bar icon's hover tooltip shows it. Leave empty for the random no-repeat rotation."
+      },
+      {
+        "key": "autoOpenAt",
+        "type": "string",
+        "label": "Auto-open daily at (HH:MM)",
+        "defaultValue": "",
+        "description": "24-hour time, e.g. 07:30. The verse overlay opens by itself at that time each day. Leave empty to disable."
       }
     ]
   }

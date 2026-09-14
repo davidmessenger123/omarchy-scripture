@@ -7,11 +7,13 @@ import qs.Commons
 import qs.Ui
 import "Scripture.js" as Scripture
 
-// Scripture — a random Bible verse on the same full-screen dark scrim Omarchy's
-// speed tests use, with no card behind it. One bar icon toggles the overlay;
-// Esc, the scrim, or the icon again closes it. Verses come from the ESV when
-// an api.esv.org key is configured; otherwise the plugin falls back to a
-// keyless random World English Bible verse from bible-api.com and labels it.
+// Scripture — a Bible verse on the same full-screen dark scrim Omarchy's speed
+// tests use, with no card behind it. One bar icon toggles the overlay; Esc, the
+// scrim, or the icon again closes it. Verses rotate through the curated no-repeat
+// deck (ESV with an api.esv.org key; keyless WEB/KJV via bible-api.com), take
+// jumps to any reference, keep session history (Back/Forward), and can be saved
+// as favorites. A fixedReference pins the verse of the day, and autoOpenAt pops
+// the overlay open at a configured time each day.
 BarWidget {
   id: root
 
@@ -38,6 +40,20 @@ BarWidget {
   property bool webRetried: false
   property bool esvRetried: false
   property string pendingKey: ""
+  property string fetchNotice: ""
+  property string liveTooltip: "Scripture — a random verse (right-click: ESV API key)"
+  property var history: []
+  property int histPos: -1
+  property var favorites: []
+  property var favoritesChipsModel: []
+  property string pendingFav: ""
+  property string currentWebTranslation: "web"
+  property string lastAutoOpenDay: ""
+
+  // QML bindings cannot see into function bodies, so keep a tracked copy of
+  // the (at most 8) favorite chips for the Repeater and refresh it whenever
+  // the list changes.
+  onFavoritesChanged: root.favoritesChipsModel = root.favoriteChips()
 
   // Absolute path to this plugin's folder (trailing slash), resolved from the
   // QML file itself so keyctl.py is found wherever the plugin lives.
@@ -95,29 +111,161 @@ BarWidget {
     return ""
   }
 
-  function refresh() {
-    if (root.loading) return
+  // The configured translation, one of "esv" / "web" / "kjv" — folded to
+  // lowercase so a verbatim schema enum value ("ESV") matches either way.
+  function providerChoice() {
+    var choice = String(root.setting("translation", "esv")).trim().toLowerCase()
+    if (choice === "kjv") return "kjv"
+    if (choice === "web") return "web"
+    return "esv"
+  }
+
+  // Pull a short centered passage around `anchor` so a tiny verse is never
+  // shown without its neighbors. `recordHistory` adds the anchor to session
+  // history; skip it for Back/Forward replays.
+  function fetchAnchor(anchor, recordHistory) {
     root.loading = true
     root.errorText = ""
+    root.fetchNotice = ""
     fetchTimeout.restart()
-
-    // Pull a short centered passage around a fresh anchor so a tiny verse is
-    // never shown without its neighbors.
-    var anchor = Scripture.randomReference(root.verseAnchor)
-    root.verseAnchor = anchor
     root.pendingReference = Scripture.rangeQuery(anchor)
     root.pendingAnchor = anchor
     root.pendingFocal = Scripture.focalVerse(anchor)
     root.webRetried = false
     root.esvRetried = false
+    if (recordHistory) root.recordHistory(anchor)
 
     var key = root.apiKey()
-    if (key) {
+    var choice = root.providerChoice()
+    if (choice === "esv" && key) {
       Scripture.runEsv(esvProcess, root.pendingReference, root.pluginDir)
       esvProcess.write(key + "\n")
-    } else {
-      Scripture.runWeb(randomProcess, root.pendingReference)
+      return
     }
+    if (choice === "esv") {
+      root.fetchNotice = "Set an ESV API key in the widget options to read the ESV — showing the World English Bible."
+    }
+    root.currentWebTranslation = choice === "kjv" ? "kjv" : "web"
+    Scripture.runWeb(randomProcess, root.pendingReference, root.currentWebTranslation)
+  }
+
+  function refresh() {
+    if (root.loading) return
+    // A fixedReference pins the verse of the day: every open and every press
+    // of the main button shows that reference instead of rotating.
+    var fixed = String(root.setting("fixedReference", "")).trim()
+    if (fixed) {
+      root.verseAnchor = fixed
+      root.fetchAnchor(fixed, true)
+      return
+    }
+    // No-repeat rotation: never repeat a reference until the whole curated
+    // deck has been shown.
+    var anchor = Scripture.randomReference(root.verseAnchor)
+    root.verseAnchor = anchor
+    root.fetchAnchor(anchor, true)
+  }
+
+  // Jump to any reference the user types, e.g. "John 3:16". It feeds the same
+  // pipeline as a rotation draw and is recorded in history. A jump still
+  // respects the fixedReference for future draws (the pinned verse stays the
+  // verse of the day, but the user can browse around it).
+  function loadReference(reference) {
+    var ref = String(reference === null || reference === undefined ? "" : reference).trim()
+    if (!ref) return
+    root.overlayOpen = true
+    root.verseAnchor = ref
+    root.fetchAnchor(ref, true)
+  }
+
+  // Session history: every fetched anchor is appended and `histPos` points at
+  // the current verse; Back/Forward walk the list. Capped at 200 entries so a
+  // long session cannot grow without bound.
+  function recordHistory(anchor) {
+    var list = root.history.slice()
+    if (list.length > 0 && list[list.length - 1] === anchor) return
+    root.history = list.concat(anchor).slice(-200)
+    root.histPos = root.history.length - 1
+  }
+
+  function back() {
+    if (root.histPos <= 0) return
+    root.histPos--
+    root.fetchAnchor(root.history[root.histPos], false)
+  }
+
+  function forward() {
+    if (root.histPos < 0 || root.histPos >= root.history.length - 1) return
+    root.histPos++
+    root.fetchAnchor(root.history[root.histPos], false)
+  }
+
+  function isFavorite(anchor) {
+    var target = String(anchor === null || anchor === undefined ? "" : anchor)
+    for (var i = 0; i < root.favorites.length; i++) {
+      if (root.favorites[i] === target) return true
+    }
+    return false
+  }
+
+  // Toggle the current verse's favorite status. Persisted to favorites.json
+  // beside the plugin by favorites.py (non-secret, atomic, symlink-safe). On
+  // success the list is re-read so the star and chips update.
+  function toggleFavorite() {
+    var anchor = root.verseAnchor || root.pendingAnchor
+    if (!anchor) return
+    root.pendingFav = anchor
+    favoritesWriteProcess.command = [
+      "python3", root.pluginDir + "favorites.py",
+      root.isFavorite(anchor) ? "remove" : "add", anchor
+    ]
+    favoritesWriteProcess.running = true
+  }
+
+  // At most 8 favorite chips in the overlay; more can live in favorites.json.
+  function favoriteChips() {
+    var chips = []
+    var n = Math.min(8, root.favorites.length)
+    for (var i = 0; i < n; i++) chips.push(root.favorites[i])
+    return chips
+  }
+
+  // Right-click panel status, reflecting the chosen translation.
+  function keyStatusText() {
+    var choice = root.providerChoice()
+    var live = choice === "esv"
+      ? "the ESV"
+      : choice === "kjv" ? "the King James Version" : "the World English Bible"
+    if (root.hasInlineKey || root.hasKeyFile) {
+      if (root.hasInlineKey) return "Key set in shell.json — showing " + live + "."
+      return "Key saved (…" + root.keyFromFile.slice(-4) + ") — showing " + live + "."
+    }
+    if (choice === "esv") return "No key — set one for the ESV, or choose WEB/KJV in the widget options."
+    return "No key — verses come keyless from " + live + "."
+  }
+
+  // Daily auto-open: at the configured HH:MM the overlay pops open (and shows
+  // the fixedReference if one is set). Fires at most once per day, so the
+  // timer keeps polling without re-opening mid-minute.
+  function checkAutoOpen() {
+    var target = String(root.setting("autoOpenAt", "")).trim()
+    if (!target) return
+    var date = new Date()
+    var hh = ("0" + date.getHours()).slice(-2)
+    var mm = ("0" + date.getMinutes()).slice(-2)
+    var now = hh + ":" + mm
+    var day = String(date.getFullYear()) + "-" + String(date.getMonth() + 1) + "-" + date.getDate()
+    if (now !== target || root.lastAutoOpenDay === day) return
+    root.lastAutoOpenDay = day
+    root.keyPanelOpen = false
+    root.overlayOpen = true
+    // onVisibleChanged below refreshes the verse once the surface is mapped.
+  }
+
+  Component.onCompleted: {
+    root.favoritesChipsModel = root.favoriteChips()
+    var fixed = String(root.setting("fixedReference", "")).trim()
+    if (fixed) root.liveTooltip = "Scripture — daily verse: " + fixed
   }
 
   // Fail-safe: never leave the overlay stuck on the loading dots if a fetch
@@ -146,6 +294,15 @@ BarWidget {
         revealTimer.running = false
       }
     }
+  }
+
+  // Polls once every 30 s for the configured daily auto-open time.
+  Timer {
+    id: autoOpenTimer
+    interval: 30000
+    repeat: true
+    running: true
+    onTriggered: root.checkAutoOpen()
   }
 
   function toggle() {
@@ -204,7 +361,7 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: "\uf02d"
-    tooltipText: "Scripture — a random verse (right-click: ESV API key)"
+    tooltipText: root.liveTooltip
     horizontalMargin: 8.25
     verticalPadding: 7.5
 
@@ -215,9 +372,10 @@ BarWidget {
   }
 
   // Right-click key manager. A free ESV key from Crossway unlocks the ESV
-  // translation; without one the plugin serves keyless World English Bible
-  // verses. The file lives beside the plugin (esv.key), while a key pasted
-  // into shell.json's `apiKey` schema field takes precedence over the file.
+  // translation; without one the plugin serves a keyless translation (WEB or
+  // KJV, per the `translation` option). The file lives beside the plugin
+  // (esv.key), while a key pasted into shell.json's `apiKey` schema field
+  // takes precedence over the file.
   KeyboardPanel {
     id: keyPanel
     anchorItem: button
@@ -264,11 +422,7 @@ BarWidget {
 
           Text {
             textFormat: Text.PlainText
-            text: root.hasInlineKey
-              ? "Key set in shell.json — the ESV is live."
-              : root.hasKeyFile
-                ? "Key saved (…" + root.keyFromFile.slice(-4) + ") — the ESV is live."
-                : "No key — verses come keyless from the World English Bible."
+            text: root.keyStatusText()
             color: root.hasInlineKey || root.hasKeyFile ? Color.foreground : Qt.darker(Color.foreground, 1.5)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -318,7 +472,7 @@ BarWidget {
 
           Button {
             text: "Remove"
-            tooltipText: "Delete the saved key and fall back to the World English Bible"
+            tooltipText: "Delete the saved key; ESV falls back to WEB/KJV"
             bordered: true
             visible: root.hasKeyFile
             enabled: root.hasKeyFile
@@ -373,6 +527,36 @@ BarWidget {
     onExited: {
       var value = keyOutput.text.trim()
       if (value) root.keyFromFile = value
+    }
+  }
+
+  // Favorites are stored beside the plugin by favorites.py (atomic,
+  // symlink-safe, non-secret). The list is read at startup and re-read after
+  // every add/remove so the star and chips stay in sync.
+  Process {
+    id: favoritesLoadProcess
+    command: ["python3", root.pluginDir + "favorites.py", "list"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      id: favoritesOutput
+    }
+    running: true
+    onExited: {
+      try {
+        var parsed = JSON.parse(favoritesOutput.text)
+        root.favorites = Array.isArray(parsed) ? parsed : []
+      } catch (e) {
+        root.favorites = []
+      }
+    }
+  }
+
+  Process {
+    id: favoritesWriteProcess
+    running: false
+    onExited: function(exitCode) {
+      root.pendingFav = ""
+      if (exitCode === 0) favoritesLoadProcess.running = true
     }
   }
 
@@ -524,12 +708,40 @@ BarWidget {
           }
 
           RowLayout {
-            spacing: Style.space(12)
+            spacing: Style.space(8)
             Layout.alignment: Qt.AlignHCenter
 
             Button {
-              text: "Another Verse"
-              tooltipText: "Get a different random verse"
+              text: "◀"
+              tooltipText: "Previous verse in this session"
+              bordered: true
+              enabled: root.histPos > 0 && !root.loading
+              opacity: enabled ? 1 : 0.25
+              foreground: root.onScrim
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(10)
+              verticalPadding: Style.space(4)
+              onClicked: root.back()
+            }
+
+            Button {
+              text: "▶"
+              tooltipText: "Next verse in this session"
+              bordered: true
+              enabled: root.histPos >= 0 && root.histPos < root.history.length - 1 && !root.loading
+              opacity: enabled ? 1 : 0.25
+              foreground: root.onScrim
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(10)
+              verticalPadding: Style.space(4)
+              onClicked: root.forward()
+            }
+
+            Button {
+              text: root.setting("fixedReference", "") !== "" ? "Repeat" : "Another Verse"
+              tooltipText: root.setting("fixedReference", "") !== "" ? "Show the fixed verse again" : "Get a different random verse"
               bordered: true
               enabled: !root.loading
               opacity: root.loading ? 0 : 1
@@ -546,6 +758,21 @@ BarWidget {
             }
 
             Button {
+              id: favoriteButton
+              text: root.favorites.indexOf(root.verseAnchor || root.pendingAnchor) !== -1 ? "★" : "☆"
+              tooltipText: root.favorites.indexOf(root.verseAnchor || root.pendingAnchor) !== -1 ? "Remove from favorites" : "Save to favorites"
+              bordered: true
+              enabled: (root.verseAnchor || root.pendingAnchor) !== "" && !root.loading
+              opacity: enabled ? 1 : 0.25
+              foreground: root.favorites.indexOf(root.verseAnchor || root.pendingAnchor) !== -1 ? "#f5c542" : root.onScrimDim
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(10)
+              verticalPadding: Style.space(4)
+              onClicked: root.toggleFavorite()
+            }
+
+            Button {
               text: root.translationId === "esv" ? "Open on esv.org" : "Open in browser"
               tooltipText: "Read the passage online"
               bordered: true
@@ -555,6 +782,7 @@ BarWidget {
               horizontalPadding: Style.space(14)
               verticalPadding: Style.space(4)
               enabled: root.verseReference !== ""
+              opacity: root.verseReference === "" ? 0.25 : 1
               onClicked: {
                 if (root.verseReference === "") return
                 browseProcess.command = [
@@ -564,6 +792,113 @@ BarWidget {
                 browseProcess.running = true
               }
             }
+          }
+
+          RowLayout {
+            id: favoritesRow
+            visible: root.favorites.length > 0
+            spacing: Style.space(6)
+            Layout.alignment: Qt.AlignHCenter
+            Layout.maximumWidth: keyCatcher.width - Style.space(96)
+
+            Repeater {
+              model: root.favoritesChipsModel
+              Button {
+                text: modelData
+                tooltipText: "Open " + modelData
+                bordered: true
+                foreground: modelData === (root.verseAnchor || root.pendingAnchor) ? root.onScrim : root.onScrimDim
+                fontFamily: root.fontFamily
+                fontSize: Style.font.caption
+                horizontalPadding: Style.space(8)
+                verticalPadding: Style.space(2)
+                onClicked: root.loadReference(modelData)
+              }
+            }
+
+            Text {
+              visible: root.favorites.length > 8
+              text: "+" + (root.favorites.length - 8) + " more"
+              color: root.onScrimDim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+
+          RowLayout {
+            id: jumpRow
+            spacing: Style.space(8)
+            Layout.alignment: Qt.AlignHCenter
+
+            Text {
+              text: "JUMP TO"
+              color: root.onScrimDim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 2
+            }
+
+            Rectangle {
+              width: Style.space(240)
+              height: 34
+              radius: 6
+              color: Qt.rgba(1, 1, 1, 0.12)
+              border.color: Qt.rgba(1, 1, 1, 0.35)
+
+              TextInput {
+                id: jumpInput
+                anchors.fill: parent
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(10)
+                verticalAlignment: TextInput.AlignVCenter
+                color: root.onScrim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                selectByMouse: true
+                onAccepted: root.loadReference(text)
+              }
+
+              // Faded hint shown only while the field is empty (this Qt
+              // revision's TextInput lacks a placeholderText property, and a
+              // plain Text overlays without stealing clicks from the input).
+              Text {
+                anchors.fill: jumpInput
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(10)
+                visible: jumpInput.text === ""
+                text: "e.g. John 3:16"
+                color: Qt.rgba(1, 1, 1, 0.25)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                verticalAlignment: Text.AlignVCenter
+              }
+            }
+
+            Button {
+              text: "Go"
+              tooltipText: "Jump to that reference"
+              bordered: true
+              foreground: root.onScrimDim
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(12)
+              verticalPadding: Style.space(4)
+              onClicked: root.loadReference(jumpInput.text)
+            }
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            visible: root.fetchNotice !== ""
+            text: root.fetchNotice
+            color: root.onScrimDim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+            Layout.maximumWidth: Style.space(440)
+            horizontalAlignment: Text.AlignHCenter
           }
 
           Text {
@@ -622,6 +957,7 @@ BarWidget {
       root.contextAfter = parts.after
       root.esvRetried = false
       root.loading = false
+      root.liveTooltip = "Scripture — " + reference + " (ESV)"
       root.startReveal()
     }
   }
@@ -644,23 +980,27 @@ BarWidget {
       if (bad) {
         if (root.pendingAnchor && root.pendingAnchor !== root.pendingReference && !root.webRetried) {
           root.webRetried = true
-          Scripture.runWeb(randomProcess, root.pendingAnchor)
+          Scripture.runWeb(randomProcess, root.pendingAnchor, root.currentWebTranslation)
           return
         }
-        root.errorText = "Could not load a random verse. Try again."
+        root.errorText = "Could not load that passage. Try again."
         root.loading = false
         return
       }
 
+      var versionId = root.currentWebTranslation === "kjv" ? "kjv" : "web"
+      var versionName = Scripture.translationText(payload) ||
+        (versionId === "kjv" ? "King James Version" : "World English Bible")
       var parts = Scripture.parseWebPassage(payload, root.pendingFocal)
-      root.translationId = "web"
-      root.translationName = Scripture.translationText(payload) || "World English Bible"
+      root.translationId = versionId
+      root.translationName = versionName
       root.verseReference = Scripture.referenceText(payload) || root.pendingReference
       root.contextBefore = parts.before
       root.verseText = parts.focal
       root.contextAfter = parts.after
       root.webRetried = false
       root.loading = false
+      root.liveTooltip = "Scripture — " + root.verseReference + " (" + versionName + ")"
       root.startReveal()
     }
   }
@@ -695,7 +1035,7 @@ BarWidget {
     onExited: function(exitCode) {
       if (exitCode === 0) {
         root.keyFromFile = ""
-        root.keyNotice = "Key removed — verses now come from the World English Bible."
+        root.keyNotice = "Key removed — ESV falls back to WEB/KJV."
         root.keyNoticeError = false
       } else {
         root.keyNotice = "Could not remove the key."
