@@ -49,6 +49,17 @@ BarWidget {
   property string pendingFav: ""
   property string currentWebTranslation: "web"
   property string lastAutoOpenDay: ""
+  // Right-click panel verse & schedule editor state (seeded from settings
+  // every time the panel opens, then written back via updateEntryInline).
+  property string panelTranslation: ""
+  property string panelFixedReference: ""
+  property string panelAutoOpenAt: ""
+  property string versionNotice: ""
+  property bool versionNoticeError: false
+  // Bumped whenever panel settings are seeded or saved; the key-panel status
+  // text references it so it re-evaluates after a live settings patch (QML
+  // cannot track dependencies through function bodies like keyStatusText()).
+  property int settingsRev: 0
 
   // QML bindings cannot see into function bodies, so keep a tracked copy of
   // the (at most 8) favorite chips for the Repeater and refresh it whenever
@@ -316,7 +327,57 @@ BarWidget {
     if (root.keyPanelOpen) {
       root.keyNotice = ""
       root.keyNoticeError = false
+      root.versionNotice = ""
+      root.versionNoticeError = false
+      root.seedPanel()
     }
+  }
+
+  // Refresh the translation / fixed verse / auto-open fields from the live
+  // settings every time the panel opens (and after a save).
+  function seedPanel() {
+    root.panelTranslation = String(root.setting("translation", "ESV")).trim() || "ESV"
+    root.panelFixedReference = String(root.setting("fixedReference", "")).trim()
+    root.panelAutoOpenAt = String(root.setting("autoOpenAt", "")).trim()
+    root.settingsRev++
+  }
+
+  // Persist the verse & schedule fields to this widget's shell.json entry and
+  // let the live shell patch the running widget. Merges with the existing
+  // settings object so unrelated keys (like an inline apiKey) survive.
+  function savePanelSettings() {
+    var translation = String(root.panelTranslation || "ESV").trim().toUpperCase()
+    if (translation !== "ESV" && translation !== "WEB" && translation !== "KJV") translation = "ESV"
+    var fixed = String(root.panelFixedReference || "").trim()
+    var auto = String(root.panelAutoOpenAt || "").trim()
+    if (auto && !/^([01]\d|2[0-3]):[0-5]\d$/.test(auto)) {
+      root.versionNotice = "Auto-open must be a 24-hour time like 07:30."
+      root.versionNoticeError = true
+      return
+    }
+
+    var merged = {}
+    var cur = root.settings || {}
+    for (var k in cur) merged[k] = cur[k]
+    merged.translation = translation
+    merged.fixedReference = fixed
+    merged.autoOpenAt = auto
+
+    root.versionNotice = ""
+    root.versionNoticeError = false
+    if (!root.bar || !root.bar.shell || typeof root.bar.shell.updateEntryInline !== "function") {
+      root.versionNotice = "The shell isn't offering settings saving for this widget."
+      root.versionNoticeError = true
+      return
+    }
+    var changed = root.bar.shell.updateEntryInline(root.moduleName, merged)
+    root.seedPanel()
+    if (changed) {
+      root.versionNotice = "Saved — applied immediately."
+    } else {
+      root.versionNotice = "No changes to save."
+    }
+    root.versionNoticeError = false
   }
 
   function closeKeyPanel() {
@@ -389,7 +450,7 @@ BarWidget {
     PanelKeyCatcher {
       id: panelKeys
       anchors.fill: parent
-      blocked: keyInput.activeFocus
+      blocked: keyInput.activeFocus || fixedInput.activeFocus || autoInput.activeFocus
       onCloseRequested: root.closeKeyPanel()
       onActivateRequested: root.saveKey()
       onReturnRequested: root.saveKey()
@@ -422,7 +483,7 @@ BarWidget {
 
           Text {
             textFormat: Text.PlainText
-            text: root.keyStatusText()
+            text: root.settingsRev >= 0 ? root.keyStatusText() : ""
             color: root.hasInlineKey || root.hasKeyFile ? Color.foreground : Qt.darker(Color.foreground, 1.5)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -504,6 +565,145 @@ BarWidget {
           text: root.keyNotice
           visible: root.keyNotice !== ""
           color: root.keyNoticeError ? Color.urgent : Color.popups.text
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.Wrap
+          Layout.fillWidth: true
+        }
+
+        Rectangle {
+          Layout.fillWidth: true
+          Layout.topMargin: Style.space(4)
+          height: 1
+          color: Qt.darker(Color.foreground, 1.5)
+        }
+
+        Text {
+          text: "VERSE & SCHEDULE"
+          color: Color.accent
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          font.letterSpacing: 2
+        }
+
+        RowLayout {
+          spacing: Style.space(6)
+          Layout.fillWidth: true
+
+          Text {
+            text: "Translation"
+            color: Qt.darker(Color.foreground, 1.5)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            Layout.fillWidth: true
+          }
+
+          Button {
+            text: "ESV"
+            tooltipText: "English Standard Version (needs the ESV key)"
+            bordered: true
+            selected: root.panelTranslation.toUpperCase() === "ESV"
+            fontFamily: Style.font.family
+            fontSize: Style.font.caption
+            horizontalPadding: Style.space(8)
+            verticalPadding: Style.space(3)
+            onClicked: root.panelTranslation = "ESV"
+          }
+
+          Button {
+            text: "WEB"
+            tooltipText: "World English Bible (keyless)"
+            bordered: true
+            selected: root.panelTranslation.toUpperCase() === "WEB"
+            fontFamily: Style.font.family
+            fontSize: Style.font.caption
+            horizontalPadding: Style.space(8)
+            verticalPadding: Style.space(3)
+            onClicked: root.panelTranslation = "WEB"
+          }
+
+          Button {
+            text: "KJV"
+            tooltipText: "King James Version (keyless)"
+            bordered: true
+            selected: root.panelTranslation.toUpperCase() === "KJV"
+            fontFamily: Style.font.family
+            fontSize: Style.font.caption
+            horizontalPadding: Style.space(8)
+            verticalPadding: Style.space(3)
+            onClicked: root.panelTranslation = "KJV"
+          }
+        }
+
+        RowLayout {
+          spacing: Style.space(8)
+          Layout.fillWidth: true
+
+          Text {
+            text: "Fixed verse"
+            color: Qt.darker(Color.foreground, 1.5)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            Layout.fillWidth: true
+          }
+
+          TextField {
+            id: fixedInput
+            Layout.preferredWidth: Style.space(150)
+            font.pixelSize: Style.font.bodySmall
+            verticalPadding: Style.space(3)
+            placeholderText: "e.g. John 3:16"
+            text: root.panelFixedReference
+            selectByMouse: true
+            onEditingFinished: root.panelFixedReference = text.trim()
+            onAccepted: root.panelFixedReference = text.trim()
+          }
+        }
+
+        RowLayout {
+          spacing: Style.space(8)
+          Layout.fillWidth: true
+
+          Text {
+            text: "Auto-open"
+            color: Qt.darker(Color.foreground, 1.5)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            Layout.fillWidth: true
+          }
+
+          TextField {
+            id: autoInput
+            Layout.preferredWidth: Style.space(110)
+            font.pixelSize: Style.font.bodySmall
+            verticalPadding: Style.space(3)
+            placeholderText: "07:30"
+            text: root.panelAutoOpenAt
+            maximumLength: 5
+            selectByMouse: true
+            onEditingFinished: root.panelAutoOpenAt = text.trim()
+            onAccepted: root.panelAutoOpenAt = text.trim()
+          }
+        }
+
+        Button {
+          text: "Apply"
+          tooltipText: "Save the translation, fixed verse, and auto-open settings for this widget"
+          bordered: true
+          selected: true
+          fontFamily: Style.font.family
+          fontSize: Style.font.bodySmall
+          horizontalPadding: Style.space(12)
+          verticalPadding: Style.space(3)
+          Layout.fillWidth: true
+          onClicked: root.savePanelSettings()
+        }
+
+        Text {
+          text: root.versionNotice
+          visible: root.versionNotice !== ""
+          color: root.versionNoticeError ? Color.urgent : Color.popups.text
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
           wrapMode: Text.Wrap

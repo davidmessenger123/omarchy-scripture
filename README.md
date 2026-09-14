@@ -5,7 +5,9 @@ surface Omarchy's speed tests use, with no card or border behind the text.
 
 Click the book icon in the Omarchy bar to open the overlay. Esc, clicking the
 scrim, or clicking the icon again closes it. **Right-click** the icon to open a
-small key panel where you can paste, save, remove, or fetch an ESV API key.
+settings panel with two sections: the ESV API key manager (paste, save, remove,
+or fetch a key) and a **Verse & Schedule** editor for the translation, the
+fixed verse of the day, and the daily auto-open time.
 
 ## Install
 
@@ -65,6 +67,10 @@ Version), **WEB** (World English Bible), or **KJV** (King James Version):
   bible-api.com, so the button works before you configure anything.
 
 ## Verse of the day / auto-open
+
+Configure these from **right-click → Verse & Schedule → Apply** (they persist
+to the widget's `settings` in shell.json and apply live), or edit shell.json
+directly:
 
 - **Fixed verse (overrides random)** — a reference like `John 3:16` pins the
   verse of the day: the overlay always opens to it, the main button becomes
