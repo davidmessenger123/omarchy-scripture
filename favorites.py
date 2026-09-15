@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Symlink-safe, atomic list/add/remove/clear of the Scripture plugin's
-favorite verse references, stored in favorites.json (a plain JSON array of
+favorite verse references, stored in .favorites.json (a plain JSON array of
 anchor strings like "John 3:16").
 
 Favorites are not secrets, but the plugin dir can sit under user- or
@@ -10,13 +10,13 @@ keyctl.py applies:
 - Every path is reached through a verified parent traversal
   (`open_plugin_dir()` walks the plugin folder component-by-component from `/`
   with `O_NOFOLLOW|O_DIRECTORY`; a symlinked component anywhere is a refusal).
-- Reads open favorites.json once via `O_NOFOLLOW|O_NONBLOCK` and, from
+- Reads open .favorites.json once via `O_NOFOLLOW|O_NONBLOCK` and, from
   fstat, refuse anything that is not a regular file owned by the current user
   with a single hard link and a file size at or below MAX_JSON_BYTES; the read
   itself is bounded to MAX_JSON_BYTES + 1.
 - Writes go to a randomized same-directory temporary file created with
   `O_CREAT|O_EXCL|O_NOFOLLOW` (mode 0600), are fsynced, then atomically
-  replace the favorites.json entry — a symlink or hard link at that name can
+  replace the .favorites.json entry — a symlink or hard link at that name can
   never redirect or truncate another file.
 
 References travel in argv (non-secret): anchors are validated (non-empty, at
@@ -35,7 +35,7 @@ import os
 import stat
 import sys
 
-FILE_NAME = "favorites.json"
+FILE_NAME = ".favorites.json"
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 MAX_ANCHOR_BYTES = 120
 MAX_ENTRIES = 200
@@ -81,16 +81,16 @@ def read_favorites(dirfd: int) -> list:
         except FileNotFoundError:
             return []
         except OSError:
-            fail("favorites.json refused open (symlink or unreadable)")
+            fail(".favorites.json refused open (symlink or unreadable)")
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
-            fail("favorites.json is not a regular file; refusing")
+            fail(".favorites.json is not a regular file; refusing")
         if st.st_uid != os.geteuid():
-            fail("favorites.json is not owned by the current user; refusing")
+            fail(".favorites.json is not owned by the current user; refusing")
         if st.st_nlink != 1:
-            fail("favorites.json has unexpected hard links; refusing")
+            fail(".favorites.json has unexpected hard links; refusing")
         if st.st_size > MAX_JSON_BYTES:
-            fail("favorites.json exceeds the %d-byte limit; refusing" % MAX_JSON_BYTES)
+            fail(".favorites.json exceeds the %d-byte limit; refusing" % MAX_JSON_BYTES)
         with os.fdopen(fd, "rb") as raw:
             data = raw.read(MAX_JSON_BYTES + 1)
         fd = None
@@ -98,18 +98,18 @@ def read_favorites(dirfd: int) -> list:
         if fd is not None:
             os.close(fd)
     if len(data) > MAX_JSON_BYTES:
-        fail("favorites.json exceeds the %d-byte limit; refusing" % MAX_JSON_BYTES)
+        fail(".favorites.json exceeds the %d-byte limit; refusing" % MAX_JSON_BYTES)
     try:
         value = json.loads(data.decode("utf-8"))
     except Exception:
-        fail("favorites.json is not valid JSON; refusing")
+        fail(".favorites.json is not valid JSON; refusing")
     if not isinstance(value, list):
-        fail("favorites.json is not a JSON list; refusing")
+        fail(".favorites.json is not a JSON list; refusing")
     return [anchor for anchor in value if isinstance(anchor, str)]
 
 
 def write_favorites(dirfd: int, anchors: list) -> None:
-    """Atomically replace favorites.json with `anchors` (never follows links)."""
+    """Atomically replace .favorites.json with `anchors` (never follows links)."""
     for anchor in anchors:
         if (
             not isinstance(anchor, str)

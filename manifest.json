@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "davidjm.scripture",
   "name": "Scripture",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "David JM",
   "license": "MIT",
   "description": "Shows a random Scripture verse on the full-screen dark scrim Omarchy's speed tests use. ESV, World English Bible, or King James Version; ESV when an api.esv.org key is set, WEB and KJV are keyless.",

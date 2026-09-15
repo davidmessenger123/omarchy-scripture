@@ -219,7 +219,7 @@ BarWidget {
     return false
   }
 
-  // Toggle the current verse's favorite status. Persisted to favorites.json
+  // Toggle the current verse's favorite status. Persisted to .favorites.json
   // beside the plugin by favorites.py (non-secret, atomic, symlink-safe). On
   // success the list is re-read so the star and chips update.
   function toggleFavorite() {
@@ -233,12 +233,20 @@ BarWidget {
     favoritesWriteProcess.running = true
   }
 
-  // At most 8 favorite chips in the overlay; more can live in favorites.json.
+  // At most 8 favorite chips in the overlay; more can live in .favorites.json.
   function favoriteChips() {
     var chips = []
     var n = Math.min(8, root.favorites.length)
     for (var i = 0; i < n; i++) chips.push(root.favorites[i])
     return chips
+  }
+
+  function removeFavorite(anchor) {
+    favoritesWriteProcess.command = [
+      "python3", root.pluginDir + "favorites.py",
+      "remove", anchor
+    ]
+    favoritesWriteProcess.running = true
   }
 
   // Right-click panel status, reflecting the chosen translation.
@@ -708,6 +716,98 @@ BarWidget {
           font.pixelSize: Style.font.caption
           wrapMode: Text.Wrap
           Layout.fillWidth: true
+        }
+
+        Rectangle {
+          Layout.fillWidth: true
+          Layout.topMargin: Style.space(4)
+          height: 1
+          color: Qt.darker(Color.foreground, 1.5)
+        }
+
+        Text {
+          text: "FAVORITES"
+          color: Color.accent
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          font.letterSpacing: 2
+        }
+
+        Text {
+          visible: root.favorites.length === 0
+          text: "No favorites yet — tap \u2606 on any verse to save it."
+          color: Qt.darker(Color.foreground, 1.5)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.Wrap
+          Layout.fillWidth: true
+        }
+
+        Rectangle {
+          visible: root.favorites.length > 0
+          Layout.fillWidth: true
+          Layout.preferredHeight: Math.min(root.favorites.length * 36, 180)
+          color: "transparent"
+          clip: true
+
+          Flickable {
+            anchors.fill: parent
+            contentHeight: favColumn.implicitHeight
+            contentWidth: parent.width
+            flickableDirection: Flickable.VerticalFlick
+            boundsBehavior: Flickable.StopAtBounds
+
+            ColumnLayout {
+              id: favColumn
+              width: parent.width
+              spacing: 0
+
+              Repeater {
+                model: root.favorites
+
+                RowLayout {
+                  spacing: Style.space(6)
+                  Layout.fillWidth: true
+                  Layout.preferredHeight: 36
+
+                  Text {
+                    text: modelData
+                    color: Color.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.bodySmall
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                  }
+
+                  Button {
+                    text: "\u25B6"
+                    tooltipText: "Load " + modelData
+                    bordered: true
+                    fontFamily: Style.font.family
+                    fontSize: Style.font.caption
+                    horizontalPadding: Style.space(8)
+                    verticalPadding: Style.space(3)
+                    onClicked: {
+                      root.loadReference(modelData)
+                      root.closeKeyPanel()
+                    }
+                  }
+
+                  Button {
+                    text: "\u00D7"
+                    tooltipText: "Remove " + modelData + " from favorites"
+                    bordered: true
+                    fontFamily: Style.font.family
+                    fontSize: Style.font.caption
+                    horizontalPadding: Style.space(8)
+                    verticalPadding: Style.space(3)
+                    onClicked: root.removeFavorite(modelData)
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }

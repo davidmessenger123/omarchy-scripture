@@ -5,9 +5,10 @@ surface Omarchy's speed tests use, with no card or border behind the text.
 
 Click the book icon in the Omarchy bar to open the overlay. Esc, clicking the
 scrim, or clicking the icon again closes it. **Right-click** the icon to open a
-settings panel with two sections: the ESV API key manager (paste, save, remove,
-or fetch a key) and a **Verse & Schedule** editor for the translation, the
-fixed verse of the day, and the daily auto-open time.
+settings panel with three sections: the ESV API key manager (paste, save, remove,
+or fetch a key), a **Verse & Schedule** editor for the translation, the
+fixed verse of the day, and the daily auto-open time, and a **Favorites** list
+where you can browse, load, or remove saved verses.
 
 ## Install
 
@@ -25,7 +26,7 @@ omarchy plugin remove davidjm.scripture
 ```
 
 The saved API key (if any) lives in `esv.key` inside the plugin directory and
-is removed automatically. Saved favorite references live in `favorites.json`;
+is removed automatically. Saved favorite references live in `.favorites.json`;
 remove the whole plugin directory to delete those too.
 
 ---
@@ -90,7 +91,7 @@ directly:
   ~220 well-known, always-valid references, so a request can never throw a
   nonexistent chapter:verse and no verse repeats until the whole deck is seen.
 - Session history (◀/▶) and favorites are separate: back/forward works while
-  the widget runs; favorites persist in `favorites.json` beside the plugin
+  the widget runs; favorites persist in `.favorites.json` beside the plugin
   (written atomically and symlink-safe, like the key file).
 - The ESV API is rate limited (60/min, 1k/hour, 5k/day); each icon click
   fetches at most one passage.

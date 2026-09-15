@@ -1,4 +1,4 @@
 # Never commit the ESV API key (contains a live token)
 esv.key
 # Never commit user favorites (widget runtime state)
-favorites.json
+.favorites.json
