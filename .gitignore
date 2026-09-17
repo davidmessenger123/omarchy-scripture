@@ -1,4 +1,3 @@
-# Never commit the ESV API key (contains a live token)
 esv.key
-# Never commit user favorites (widget runtime state)
+__pycache__/
 .favorites.json

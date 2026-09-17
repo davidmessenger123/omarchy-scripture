@@ -104,12 +104,59 @@ BarWidget {
   property int revealStep: 1
   readonly property int revealIntervalMs: 16
   readonly property int revealDurationMs: 2200
+  readonly property real revealProgress: root.revealedChars < 0 ? 1
+    : root.revealTotal > 0 ? Math.min(1, root.revealedChars / root.revealTotal) : 1
+  readonly property string composedHtml: ""
+  readonly property real verseMaxWidth: Math.min(
+    keyCatcher.width - Style.space(96),
+    Style.space(760))
 
   function startReveal() {
+    root.composedHtml = Scripture.composeRichText(root.contextBefore, root.verseText, root.contextAfter)
     root.revealTotal = (root.contextBefore + root.verseText + root.contextAfter).length
     root.revealStep = Math.max(1, Math.ceil(root.revealTotal * root.revealIntervalMs / root.revealDurationMs))
     root.revealedChars = 0
     revealTimer.restart()
+  }
+
+  // In-session passage cache: a successful fetch is reused within cacheTtlMs,
+  // so re-opening the verse of the day or walking Back/Forward never re-hits
+  // the API (and the ESV quota).
+  property var passageCache: ({})
+  readonly property int cacheTtlMs: 4 * 60 * 60 * 1000
+
+  function passageCacheKey() {
+    return root.providerChoice() + "|" + root.pendingReference
+  }
+
+  function cachedPassage() {
+    var entry = root.passageCache[root.passageCacheKey()]
+    if (!entry || Date.now() - entry.at > root.cacheTtlMs) return null
+    return entry
+  }
+
+  function applyCached(entry) {
+    root.translationId = entry.translationId
+    root.translationName = entry.translationName
+    root.verseReference = entry.reference
+    root.contextBefore = entry.before
+    root.verseText = entry.focal
+    root.contextAfter = entry.after
+    root.loading = false
+    fetchTimeout.stop()
+    root.startReveal()
+  }
+
+  function rememberPassage() {
+    root.passageCache[root.passageCacheKey()] = {
+      at: Date.now(),
+      translationId: root.translationId,
+      translationName: root.translationName,
+      reference: root.verseReference,
+      before: root.contextBefore,
+      focal: root.verseText,
+      after: root.contextAfter
+    }
   }
 
   // Preferred key source: the widget's inline shell.json entry, then an
@@ -135,13 +182,21 @@ BarWidget {
   // shown without its neighbors. `recordHistory` adds the anchor to session
   // history; skip it for Back/Forward replays.
   function fetchAnchor(anchor, recordHistory) {
-    root.loading = true
     root.errorText = ""
     root.fetchNotice = ""
-    fetchTimeout.restart()
     root.pendingReference = Scripture.rangeQuery(anchor)
     root.pendingAnchor = anchor
     root.pendingFocal = Scripture.focalVerse(anchor)
+
+    var cached = root.cachedPassage()
+    if (cached) {
+      if (recordHistory) root.recordHistory(anchor)
+      root.applyCached(cached)
+      return
+    }
+
+    root.loading = true
+    fetchTimeout.restart()
     root.webRetried = false
     root.esvRetried = false
     if (recordHistory) root.recordHistory(anchor)
@@ -315,12 +370,13 @@ BarWidget {
     }
   }
 
-  // Polls once every 30 s for the configured daily auto-open time.
+  // Polls once every 30 s for the configured daily auto-open time. Only armed
+  // when a time is actually configured, so an unset schedule costs no polling.
   Timer {
     id: autoOpenTimer
     interval: 30000
     repeat: true
-    running: true
+    running: String(root.setting("autoOpenAt", "")).trim() !== ""
     onTriggered: root.checkAutoOpen()
   }
 
@@ -969,29 +1025,40 @@ BarWidget {
             horizontalAlignment: Text.AlignHCenter
           }
 
-          Text {
-            textFormat: Text.RichText
+          Item {
             Layout.alignment: Qt.AlignHCenter
-            Layout.maximumWidth: Math.min(
-              keyCatcher.width - Style.space(96),
-              Style.space(760))
-            text: root.loading && !root.hasContent ? "…"
-              : root.hasContent
-                ? Scripture.composeRichText(root.contextBefore, root.verseText, root.contextAfter, root.revealedChars)
-                : ""
-            color: root.onScrim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.displayLarge
-            font.weight: Font.Light
-            lineHeight: 1.55
-            wrapMode: Text.Wrap
-            horizontalAlignment: Text.AlignHCenter
-            // Keep the previous verse on screen (dimmed) while a refresh is
-            // in flight, so the cluster never shifts or blanks.
-            opacity: root.loading ? 0.45 : 1
+            Layout.maximumWidth: root.verseMaxWidth
+            implicitWidth: verseTextItem.implicitWidth
+            implicitHeight: verseTextItem.implicitHeight
+            width: Math.min(verseTextItem.implicitWidth, root.verseMaxWidth)
+            // The typewriter reveal is a growing clip over one statically
+            // composed passage, so the rich text is parsed exactly once per
+            // verse instead of being re-escaped and re-laid-out every tick.
+            clip: true
+            height: root.revealProgress * verseTextItem.implicitHeight
 
-            Behavior on opacity {
-              NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+            Text {
+              id: verseTextItem
+              anchors.top: parent.top
+              anchors.horizontalCenter: parent.horizontalCenter
+              width: root.verseMaxWidth
+              textFormat: Text.RichText
+              text: root.composedHtml !== "" ? root.composedHtml
+                : (root.loading ? "…" : "")
+              color: root.onScrim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.displayLarge
+              font.weight: Font.Light
+              lineHeight: 1.55
+              wrapMode: Text.Wrap
+              horizontalAlignment: Text.AlignHCenter
+              // Keep the previous verse on screen (dimmed) while a refresh is
+              // in flight, so the cluster never shifts or blanks.
+              opacity: root.loading ? 0.45 : 1
+
+              Behavior on opacity {
+                NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+              }
             }
           }
 
@@ -1233,6 +1300,13 @@ BarWidget {
       var payload = null
       try { payload = JSON.parse(esvOutput.text) } catch (e) {}
 
+      if (exitCode === 3) {
+        fetchTimeout.stop()
+        root.errorText = "The ESV API limited the request. Wait a moment, then try again."
+        root.loading = false
+        return
+      }
+
       // Some providers don't answer range queries for a few books (bible-api
       // chokes on "1 John 1:7-11"); fall back to the plain anchor verse once.
       if (exitCode !== 0 || !payload || !Array.isArray(payload.passages) || payload.passages.length === 0) {
@@ -1242,6 +1316,7 @@ BarWidget {
           esvProcess.write(root.apiKey() + "\n")
           return
         }
+        fetchTimeout.stop()
         root.errorText = "Could not load from the ESV API. Check your key and connection."
         root.loading = false
         return
@@ -1257,6 +1332,8 @@ BarWidget {
       root.contextAfter = parts.after
       root.esvRetried = false
       root.loading = false
+      fetchTimeout.stop()
+      root.rememberPassage()
       root.liveTooltip = "Scripture — " + reference + " (ESV)"
       root.startReveal()
     }
@@ -1283,6 +1360,7 @@ BarWidget {
           Scripture.runWeb(randomProcess, root.pendingAnchor, root.currentWebTranslation)
           return
         }
+        fetchTimeout.stop()
         root.errorText = "Could not load that passage. Try again."
         root.loading = false
         return
@@ -1300,6 +1378,8 @@ BarWidget {
       root.contextAfter = parts.after
       root.webRetried = false
       root.loading = false
+      fetchTimeout.stop()
+      root.rememberPassage()
       root.liveTooltip = "Scripture — " + root.verseReference + " (" + versionName + ")"
       root.startReveal()
     }

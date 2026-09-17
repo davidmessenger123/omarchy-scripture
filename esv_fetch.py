@@ -92,6 +92,11 @@ def main() -> None:
     finally:
         conn.close()
 
+    if status == 429 or 500 <= status < 600:
+        # Rate-limit or server-side error: retrying immediately doubles the
+        # request (and burns quota), so signal the caller not to auto-retry.
+        print("esv returned HTTP %d, not retrying" % status, file=sys.stderr)
+        sys.exit(3)
     if status != 200:
         # Still bounded: only the (already read) status body made it in.
         print("esv returned HTTP %d" % status, file=sys.stderr)

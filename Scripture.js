@@ -121,51 +121,6 @@ function randomReference(avoid) {
   return reference
 }
 
-// api.esv.org returns a single passage string; collapse its line breaks into
-// single spaces and drop any residual reference line or copyright suffix.
-function cleanEsvText(raw, reference) {
-  var text = String(raw === null || raw === undefined ? "" : raw)
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .trim()
-
-  if (reference) {
-    var line = text.split("\n")[0].trim()
-    if (line.toLowerCase() === String(reference).trim().toLowerCase()) {
-      text = text.slice(line.length).replace(/^[\s\n]+/, "")
-    }
-  }
-
-  text = text
-    .replace(/\s*\(ESV\)\s*$/, "")
-    .replace(/^\s*\[\d+\]\s*/gm, "")   // residual verse markers, if any
-    .replace(/\n{2,}/g, "\n")
-    .trim()
-
-  return text
-}
-
-// bible-api.com's random response (or a generic one) collapses into display
-// text. The random endpoint returns `random_verse.text`; older paths returned
-// per-verse objects, so handle both.
-function cleanWebText(payload) {
-  var random = payload && payload.random_verse && payload.random_verse.text
-  if (random) return String(random).replace(/\s{2,}/g, " ").trim()
-
-  var verses = payload && Array.isArray(payload.verses) ? payload.verses : []
-  if (verses.length === 0) {
-    return String(payload && payload.text ? payload.text : "").trim()
-  }
-
-  var parts = []
-  for (var i = 0; i < verses.length; i++) {
-    var text = String(verses[i] && verses[i].text ? verses[i].text : "").trim()
-    if (text) parts.push(text)
-  }
-
-  return parts.join(" ").replace(/\s{2,}/g, " ").trim()
-}
-
 // bible-api.com random responses aren't keyed by a `reference` field; build
 // one from the verse object when present, otherwise use `reference` as-is.
 function referenceText(payload) {
